@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: x402-jp-loccheck
+    runtime: docker
+    plan: free
+    healthCheckPath: /

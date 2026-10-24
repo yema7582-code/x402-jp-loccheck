@@ -1,0 +1,4 @@
+node_modules
+srv.log
+__pycache__
+.git
