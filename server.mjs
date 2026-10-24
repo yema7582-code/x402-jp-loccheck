@@ -49,6 +49,19 @@ app.get('/openapi.json', (_q, r) => r.json({
     },
   },
 }));
+// Mirror the v2 PAYMENT-REQUIRED header into the 402 JSON body so v1-style indexers (x402dash etc.) see `accepts`.
+app.use((_q, r, next) => {
+  const end = r.end.bind(r);
+  r.end = (chunk, ...rest) => {
+    const h = r.statusCode === 402 && r.getHeader('PAYMENT-REQUIRED');
+    const body = chunk ? chunk.toString() : '';
+    if (h && (!body || body === '{}')) {
+      try { const j = Buffer.from(String(h), 'base64').toString('utf8'); r.setHeader('Content-Length', Buffer.byteLength(j)); return end(j, ...rest.filter(x => typeof x === 'function')); } catch {}
+    }
+    return end(chunk, ...rest);
+  };
+  next();
+});
 app.use(paymentMiddleware({
   'POST /api/loccheck': {
     accepts: ACCEPTS, description: DESC, mimeType: 'text/markdown',
