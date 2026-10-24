@@ -38,7 +38,7 @@ app.use(paymentMiddleware({
 app.post('/api/loccheck', (q, r) => {
   const d = mkdtempSync(join(tmpdir(), 'lc-')); const f = join(d, 'in.csv');
   writeFileSync(f, q.body || '');
-  try { r.type('text/markdown').send(execFileSync('python3', [LOCCHECK, f], { timeout: 10000 }).toString()); }
+  try { r.type('text/markdown').send(execFileSync('python3', [LOCCHECK, '--aso', f], { timeout: 10000 }).toString()); }
   catch (e) { r.status(400).send('Could not parse CSV: expected header key,source,target'); }
 });
 app.listen(process.env.PORT || 4021, () => console.log('listening', process.env.PORT || 4021));
