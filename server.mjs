@@ -34,9 +34,10 @@ const ACCEPTS = [
 const DESC = 'Check a JA/ZH localization CSV (key,source,target) for placeholder, blank, untranslated and CJK punctuation errors';
 const SAMPLE = 'key,source,target\nmenu.start,Start {name},スタート\n';
 const OUT = '# Localization check\n- menu.start: placeholder {name} missing in target\n';
+app.get('/favicon.ico', (_q, r) => r.sendFile(new URL('./favicon.ico', import.meta.url).pathname));
 app.get('/openapi.json', (_q, r) => r.json({
   openapi: '3.0.3',
-  info: { title: 'JA/ZH localization check (x402)', version: '1.0.0', description: DESC },
+  info: { title: 'JA/ZH localization check (x402)', version: '1.0.0', description: DESC, contact: { name: 'Shinji Nakasaki', email: 'shinji-work@mail.grokbot.com' } },
   servers: [{ url: 'https://x402-jp-loccheck.onrender.com' }],
   paths: {
     '/api/loccheck': {
