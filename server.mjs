@@ -17,7 +17,7 @@ const SOL_PAYTO = '8BwJ9oHnwfiQgAMrR6fbBX4e1EcELGaeyiRAeP21sLbo';
 const BASE = 'eip155:8453', SOL = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 const LOCCHECK = process.env.LOCCHECK || new URL('./loccheck.py', import.meta.url).pathname;
 
-const facilitator = new HTTPFacilitatorClient({ url: process.env.FACILITATOR || 'https://facilitator.opencovenant.org' });
+const facilitator = new HTTPFacilitatorClient({ url: process.env.FACILITATOR || 'https://facilitator.payai.network' });
 const server = new x402ResourceServer(facilitator).register(BASE, new ExactEvmScheme()).register(SOL, new ExactSvmScheme()).registerExtension(bazaarResourceServerExtension);
 
 const app = express();
