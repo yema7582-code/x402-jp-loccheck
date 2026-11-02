@@ -26,7 +26,8 @@ app.use(express.text({ type: '*/*', limit: '512kb' }));
 app.get('/', (_q, r) => r.type('text/plain').send(
   'Japanese/Chinese localization check for game/app string tables.\n' +
   'POST /api/loccheck with a UTF-8 CSV (columns key,source,target). $0.01 USDC via x402 (Base or Solana).\n' +
-  'Flags blank/untranslated targets, placeholder mismatches, duplicate keys, half-width punctuation, "..." vs "…", leftover English.\n'));
+  'Flags blank/untranslated targets, placeholder mismatches, duplicate keys, half-width punctuation, "..." vs "…", leftover English.\n' +
+  'Free trial (first 5 rows, no payment): POST /api/loccheck/trial\n'));
 const ACCEPTS = [
   { scheme: 'exact', price: '$0.01', network: BASE, payTo: BASE_PAYTO },
   { scheme: 'exact', price: '$0.01', network: SOL, payTo: SOL_PAYTO },
@@ -40,6 +41,10 @@ app.get('/openapi.json', (_q, r) => r.json({
   info: { title: 'JA/ZH localization check (x402)', version: '1.0.0', description: DESC, contact: { name: 'Shinji Nakasaki', email: 'shinji-work@mail.grokbot.com' } },
   servers: [{ url: 'https://x402-jp-loccheck.onrender.com' }],
   paths: {
+    '/api/loccheck/trial': {
+      post: { summary: 'Free trial: same check on the first 5 rows only (no payment)', requestBody: { required: true, content: { 'text/csv': { schema: { type: 'string' }, example: SAMPLE } } },
+        responses: { '200': { description: 'Markdown report (first 5 rows)' } } },
+    },
     '/api/loccheck': {
       post: { summary: DESC, 'x-payment-info': { protocol: 'x402', price: '0.01', currency: 'USDC', networks: [BASE, SOL] },
         requestBody: { required: true, content: { 'text/csv': { schema: { type: 'string' }, example: SAMPLE } } },
@@ -50,6 +55,12 @@ app.get('/openapi.json', (_q, r) => r.json({
     },
   },
 }));
+// Free trial: checks only the header + first 5 rows, so buyer agents can verify the service before paying.
+const trial = (csv) => (csv || '').split(/\r?\n/).slice(0, 6).join('\n') + '\n';
+const TRIAL_NOTE = '\n\n_Free trial: only the first 5 rows were checked. Full table: POST /api/loccheck ($0.01 USDC via x402)._\n';
+const runTrial = (csv, r) => run(trial(csv), r, TRIAL_NOTE);
+app.post('/api/loccheck/trial', (q, r) => runTrial(typeof q.body === 'string' ? q.body : '', r));
+app.get('/api/loccheck/trial', (q, r) => runTrial(String(q.query.csv || ''), r));
 // Mirror the v2 PAYMENT-REQUIRED header into the 402 JSON body so v1-style indexers (x402dash etc.) see `accepts`.
 app.use((_q, r, next) => {
   const end = r.end.bind(r);
@@ -73,10 +84,10 @@ app.use(paymentMiddleware({
     extensions: declareDiscoveryExtension({ input: { csv: SAMPLE }, inputSchema: { properties: { csv: { type: 'string' } }, required: ['csv'] }, output: { example: { report: OUT } } }),
   },
 }, server));
-const run = (csv, r) => {
+const run = (csv, r, note = '') => {
   const d = mkdtempSync(join(tmpdir(), 'lc-')); const f = join(d, 'in.csv');
   writeFileSync(f, csv || '');
-  try { r.type('text/markdown').send(execFileSync('python3', [LOCCHECK, '--aso', f], { timeout: 10000 }).toString()); }
+  try { r.type('text/markdown').send(execFileSync('python3', [LOCCHECK, '--aso', f], { timeout: 10000 }).toString().replace(f, 'input.csv') + note); }
   catch (e) { r.status(400).send('Could not parse CSV: expected header key,source,target'); }
 };
 app.post('/api/loccheck', (q, r) => run(typeof q.body === 'string' ? q.body : '', r));
