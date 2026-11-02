@@ -13,6 +13,7 @@ import { ExactSvmScheme } from '@x402/svm/exact/server';
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from '@x402/extensions/bazaar';
 import { jpdate, COVERAGE } from './jpdate.mjs';
 import { zipLookup, ZIP_META } from './zipcode.mjs';
+import { bankLookup, BANK_META } from './bank.mjs';
 
 const BASE_PAYTO = '0x4C4860b980a3AE0c91aa69e8eff48009C5469fEe';
 const SOL_PAYTO = '8BwJ9oHnwfiQgAMrR6fbBX4e1EcELGaeyiRAeP21sLbo';
@@ -36,7 +37,10 @@ app.get('/', (_q, r) => r.type('text/plain').send(
   'Free trial (date info only, no add/to): GET /api/jpdate/trial?date=...\n\n' +
   'Japanese postal code API: GET /api/zip?zip=100-0001 ($0.001 USDC via x402), or zips=a,b,c (up to 100 per call).\n' +
   'Returns prefecture/city/town in kanji, kana and romaji plus the JIS municipality code; accepts 〒, hyphens and full-width digits.\n' +
-  'Data: Japan Post (' + ZIP_META.zip_codes + ' codes, updated ' + ZIP_META.data_updated + '). Free trial (prefecture + city only): GET /api/zip/trial?zip=...\n'));
+  'Data: Japan Post (' + ZIP_META.zip_codes + ' codes, updated ' + ZIP_META.data_updated + '). Free trial (prefecture + city only): GET /api/zip/trial?zip=...\n\n' +
+  'Japanese bank transfer API: GET /api/bank?bank=0005&branch=新宿&name=株式会社サンプル&account=12345 ($0.001 USDC via x402).\n' +
+  'Bank/branch code (全銀コード) or name to name/kana/romaji, plus 振込名義 conversion to zengin half-width kana (ｶ) ﾕ) (ﾄﾞ etc.) with invalid-character flags.\n' +
+  'Data: zengin-code (MIT, ' + BANK_META.banks + ' banks, ' + BANK_META.branches + ' branches). Free trial (bank name only): GET /api/bank/trial?bank=0005\n'));
 const ACCEPTS = [
   { scheme: 'exact', price: '$0.01', network: BASE, payTo: BASE_PAYTO },
   { scheme: 'exact', price: '$0.01', network: SOL, payTo: SOL_PAYTO },
@@ -50,13 +54,17 @@ const ZP_DESC = 'Japanese postal code (郵便番号) to address: prefecture, cit
 const ZP_OUT = { zip: '100-0001', found: true, results: [{ prefecture: '東京都', city: '千代田区', town: '千代田', address: '東京都千代田区千代田', kana: { prefecture: 'トウキョウト', city: 'チヨダク', town: 'チヨダ' }, romaji: { prefecture: 'TOKYO TO', city: 'CHIYODA KU', town: 'CHIYODA' }, jis_code: '13101' }] };
 const zp = (q, r, trial) => { try { const o = zipLookup(q.query, trial); if (trial) o.note = 'Free trial: town, kana, romaji, JIS code and batch need the paid route GET /api/zip ($0.001 USDC via x402).'; r.json(o); } catch (e) { r.status(400).json({ error: e.message }); } };
 app.get('/api/zip/trial', (q, r) => zp(q, r, true));
+const BK_DESC = 'Japanese bank transfer helper: bank/branch code (zengin) or name to kanji/kana/romaji, 振込名義 to zengin half-width kana with corporate abbreviations and invalid-character flags, account number check';
+const BK_OUT = { bank: { code: '0005', name: '三菱ＵＦＪ', kana: 'ミツビシユ－エフジエイ' }, branch: { code: '341', name: '新宿', kana: 'シンジユク' }, account_name: { zengin_kana: 'ｶ)ｻﾝﾌﾟﾙ', valid: true }, account_number: { normalized: '0012345', valid: true } };
+const bk = (q, r, trial) => { try { const o = bankLookup(q.query, trial); if (trial) o.note = 'Free trial: branch, kana, 振込名義 conversion and account check need the paid route GET /api/bank ($0.001 USDC via x402).'; r.json(o); } catch (e) { r.status(400).json({ error: e.message }); } };
+app.get('/api/bank/trial', (q, r) => bk(q, r, true));
 const DESC = 'Check a JA/ZH localization CSV (key,source,target) for placeholder, blank, untranslated and CJK punctuation errors';
 const SAMPLE = 'key,source,target\nmenu.start,Start {name},スタート\n';
 const OUT = '# Localization check\n- menu.start: placeholder {name} missing in target\n';
 app.get('/favicon.ico', (_q, r) => r.sendFile(new URL('./favicon.ico', import.meta.url).pathname));
 app.get('/openapi.json', (_q, r) => r.json({
   openapi: '3.0.3',
-  info: { title: 'JA/ZH localization check + Japanese calendar API (x402)', version: '1.0.0', description: DESC, contact: { name: 'Shinji Nakasaki', email: 'shinji-work@mail.grokbot.com' } },
+  info: { title: 'JA/ZH localization check + Japanese calendar, postal code and bank code APIs (x402)', version: '1.0.0', description: DESC, contact: { name: 'Shinji Nakasaki', email: 'shinji-work@mail.grokbot.com' } },
   servers: [{ url: 'https://x402-jp-loccheck.onrender.com' }],
   paths: {
     '/api/jpdate': {
@@ -71,6 +79,13 @@ app.get('/openapi.json', (_q, r) => r.json({
         parameters: [{ name: 'zip', in: 'query', schema: { type: 'string' }, example: '100-0001' }, { name: 'zips', in: 'query', schema: { type: 'string' }, description: 'comma-separated, up to 100' }],
         responses: { '200': { description: 'JSON address', content: { 'application/json': { example: ZP_OUT } } }, '402': { description: 'Payment Required (x402, $0.001 USDC)' } } },
     },
+    '/api/bank': {
+      get: { summary: BK_DESC, 'x-payment-info': { protocol: 'x402', price: '0.001', currency: 'USDC', networks: [BASE, SOL] },
+        parameters: [{ name: 'bank', in: 'query', schema: { type: 'string' }, example: '0005' }, { name: 'branch', in: 'query', schema: { type: 'string' }, example: '341' },
+          { name: 'name', in: 'query', schema: { type: 'string' }, description: '振込名義 (account holder) to convert' }, { name: 'account', in: 'query', schema: { type: 'string' } }],
+        responses: { '200': { description: 'JSON', content: { 'application/json': { example: BK_OUT } } }, '402': { description: 'Payment Required (x402, $0.001 USDC)' } } },
+    },
+    '/api/bank/trial': { get: { summary: 'Free trial: bank name for one bank code', parameters: [{ name: 'bank', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON' } } } },
     '/api/zip/trial': { get: { summary: 'Free trial: prefecture and city for one postal code', parameters: [{ name: 'zip', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON' } } } },
     '/api/jpdate/trial': { get: { summary: 'Free trial: day info for one date (no add_business_days / to)', parameters: [{ name: 'date', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON day info' } } } },
     '/api/loccheck/trial': {
@@ -123,9 +138,14 @@ app.use(paymentMiddleware({
     accepts: JD_ACCEPTS, description: ZP_DESC, mimeType: 'application/json',
     extensions: declareDiscoveryExtension({ input: { zip: '100-0001' }, inputSchema: { properties: { zip: { type: 'string' }, zips: { type: 'string' } } }, output: { example: ZP_OUT } }),
   },
+  'GET /api/bank': {
+    accepts: JD_ACCEPTS, description: BK_DESC, mimeType: 'application/json',
+    extensions: declareDiscoveryExtension({ input: { bank: '0005', branch: '341', name: '株式会社サンプル' }, inputSchema: { properties: { bank: { type: 'string' }, branch: { type: 'string' }, name: { type: 'string' }, account: { type: 'string' } } }, output: { example: BK_OUT } }),
+  },
 }, server));
 app.get('/api/jpdate', (q, r) => jd(q, r, false));
 app.get('/api/zip', (q, r) => zp(q, r, false));
+app.get('/api/bank', (q, r) => bk(q, r, false));
 const run = (csv, r, note = '') => {
   const d = mkdtempSync(join(tmpdir(), 'lc-')); const f = join(d, 'in.csv');
   writeFileSync(f, csv || '');

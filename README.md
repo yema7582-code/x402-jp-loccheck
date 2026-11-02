@@ -28,3 +28,14 @@ Returns prefecture, city and town in kanji, kana and romaji, the full address st
 Input may include 〒, hyphens or full-width digits. Codes shared by several towns return every match (`multiple: true`).
 Data: Japan Post `utf_ken_all.zip` (2026-10-30 update, 120,721 codes) plus `KEN_ALL_ROME` for romaji; every response carries the data date.
 Free trial: `GET /api/zip/trial?zip=...` (prefecture + city only).
+
+## Japanese bank transfer API
+
+`GET /api/bank?bank=0005&branch=341&name=株式会社サンプル&account=12345`, $0.001 USDC via x402 (Base or Solana).
+
+- `bank`: 4-digit zengin bank code or bank name (三菱UFJ, 楽天, ゆうちょ…)
+- `branch`: 3-digit branch code or branch name
+- `name`: account holder (振込名義) converted to zengin half-width kana, with 株式会社/有限会社/合同会社 etc. abbreviated (ｶ) / (ｶ), small kana enlarged, ー to -, and kanji or other disallowed characters flagged
+- `account`: account number check, zero-padded to 7 digits
+
+Free trial: `GET /api/bank/trial?bank=0005` (bank name only). Data: [zengin-code](https://github.com/zengin-code/source-data) (MIT), 1,146 banks and 28,944 branches.
