@@ -11,6 +11,7 @@ import { HTTPFacilitatorClient } from '@x402/core/server';
 import { ExactEvmScheme } from '@x402/evm/exact/server';
 import { ExactSvmScheme } from '@x402/svm/exact/server';
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from '@x402/extensions/bazaar';
+import { jpdate, COVERAGE } from './jpdate.mjs';
 
 const BASE_PAYTO = '0x4C4860b980a3AE0c91aa69e8eff48009C5469fEe';
 const SOL_PAYTO = '8BwJ9oHnwfiQgAMrR6fbBX4e1EcELGaeyiRAeP21sLbo';
@@ -27,20 +28,37 @@ app.get('/', (_q, r) => r.type('text/plain').send(
   'Japanese/Chinese localization check for game/app string tables.\n' +
   'POST /api/loccheck with a UTF-8 CSV (columns key,source,target). $0.01 USDC via x402 (Base or Solana).\n' +
   'Flags blank/untranslated targets, placeholder mismatches, duplicate keys, half-width punctuation, "..." vs "…", leftover English.\n' +
-  'Free trial (first 5 rows, no payment): POST /api/loccheck/trial\n'));
+  'Free trial (first 5 rows, no payment): POST /api/loccheck/trial\n\n' +
+  'Japanese calendar API: GET /api/jpdate?date=2026-11-02 ($0.001 USDC via x402). 和暦⇄西暦 (令和/平成/昭和/大正/明治, R8.11.2, 元年),\n' +
+  'national holidays from the Cabinet Office list (' + COVERAGE.from.slice(0, 4) + '-' + COVERAGE.to.slice(0, 4) + '), business-day check,\n' +
+  'add_business_days=N, to=DATE (business days between), yearend=none|gov|bank (12/29-1/3 or 12/31-1/3 closures). JSON out.\n' +
+  'Free trial (date info only, no add/to): GET /api/jpdate/trial?date=...\n'));
 const ACCEPTS = [
   { scheme: 'exact', price: '$0.01', network: BASE, payTo: BASE_PAYTO },
   { scheme: 'exact', price: '$0.01', network: SOL, payTo: SOL_PAYTO },
 ];
+const JD_ACCEPTS = ACCEPTS.map((a) => ({ ...a, price: '$0.001' }));
+const JD_DESC = 'Japanese calendar: wareki (Reiwa/Heisei/Showa) to/from Gregorian, Japanese national holidays, business-day check, add N business days, business days between two dates';
+const JD_OUT = { date: '2026-11-03', weekday: '火', wareki: { era: '令和', year: 8, text: '令和8年11月3日', short: 'R8.11.3' }, holiday: '文化の日', business_day: false };
+const jd = (q, r, trial) => { try { const p = { ...q.query }; if (trial) { delete p.add_business_days; delete p.to; } const o = jpdate(p); if (trial) o.note = 'Free trial: add_business_days and to need the paid route GET /api/jpdate ($0.001 USDC via x402).'; r.json(o); } catch (e) { r.status(400).json({ error: e.message }); } };
+app.get('/api/jpdate/trial', (q, r) => jd(q, r, true));
 const DESC = 'Check a JA/ZH localization CSV (key,source,target) for placeholder, blank, untranslated and CJK punctuation errors';
 const SAMPLE = 'key,source,target\nmenu.start,Start {name},スタート\n';
 const OUT = '# Localization check\n- menu.start: placeholder {name} missing in target\n';
 app.get('/favicon.ico', (_q, r) => r.sendFile(new URL('./favicon.ico', import.meta.url).pathname));
 app.get('/openapi.json', (_q, r) => r.json({
   openapi: '3.0.3',
-  info: { title: 'JA/ZH localization check (x402)', version: '1.0.0', description: DESC, contact: { name: 'Shinji Nakasaki', email: 'shinji-work@mail.grokbot.com' } },
+  info: { title: 'JA/ZH localization check + Japanese calendar API (x402)', version: '1.0.0', description: DESC, contact: { name: 'Shinji Nakasaki', email: 'shinji-work@mail.grokbot.com' } },
   servers: [{ url: 'https://x402-jp-loccheck.onrender.com' }],
   paths: {
+    '/api/jpdate': {
+      get: { summary: JD_DESC, 'x-payment-info': { protocol: 'x402', price: '0.001', currency: 'USDC', networks: [BASE, SOL] },
+        parameters: [{ name: 'date', in: 'query', required: true, schema: { type: 'string' }, example: '令和8年11月3日' },
+          { name: 'add_business_days', in: 'query', schema: { type: 'integer' } }, { name: 'to', in: 'query', schema: { type: 'string' } },
+          { name: 'yearend', in: 'query', schema: { type: 'string', enum: ['none', 'gov', 'bank'] } }],
+        responses: { '200': { description: 'JSON day info', content: { 'application/json': { example: JD_OUT } } }, '402': { description: 'Payment Required (x402, $0.001 USDC)' } } },
+    },
+    '/api/jpdate/trial': { get: { summary: 'Free trial: day info for one date (no add_business_days / to)', parameters: [{ name: 'date', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON day info' } } } },
     '/api/loccheck/trial': {
       post: { summary: 'Free trial: same check on the first 5 rows only (no payment)', requestBody: { required: true, content: { 'text/csv': { schema: { type: 'string' }, example: SAMPLE } } },
         responses: { '200': { description: 'Markdown report (first 5 rows)' } } },
@@ -83,7 +101,12 @@ app.use(paymentMiddleware({
     accepts: ACCEPTS, description: DESC + ' (csv query parameter)', mimeType: 'text/markdown',
     extensions: declareDiscoveryExtension({ input: { csv: SAMPLE }, inputSchema: { properties: { csv: { type: 'string' } }, required: ['csv'] }, output: { example: { report: OUT } } }),
   },
+  'GET /api/jpdate': {
+    accepts: JD_ACCEPTS, description: JD_DESC, mimeType: 'application/json',
+    extensions: declareDiscoveryExtension({ input: { date: '2026-11-03', add_business_days: 3 }, inputSchema: { properties: { date: { type: 'string' }, add_business_days: { type: 'integer' }, to: { type: 'string' }, yearend: { type: 'string' } }, required: ['date'] }, output: { example: JD_OUT } }),
+  },
 }, server));
+app.get('/api/jpdate', (q, r) => jd(q, r, false));
 const run = (csv, r, note = '') => {
   const d = mkdtempSync(join(tmpdir(), 'lc-')); const f = join(d, 'in.csv');
   writeFileSync(f, csv || '');
