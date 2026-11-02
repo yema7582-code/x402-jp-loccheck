@@ -12,6 +12,7 @@ import { ExactEvmScheme } from '@x402/evm/exact/server';
 import { ExactSvmScheme } from '@x402/svm/exact/server';
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from '@x402/extensions/bazaar';
 import { jpdate, COVERAGE } from './jpdate.mjs';
+import { zipLookup, ZIP_META } from './zipcode.mjs';
 
 const BASE_PAYTO = '0x4C4860b980a3AE0c91aa69e8eff48009C5469fEe';
 const SOL_PAYTO = '8BwJ9oHnwfiQgAMrR6fbBX4e1EcELGaeyiRAeP21sLbo';
@@ -32,7 +33,10 @@ app.get('/', (_q, r) => r.type('text/plain').send(
   'Japanese calendar API: GET /api/jpdate?date=2026-11-02 ($0.001 USDC via x402). 和暦⇄西暦 (令和/平成/昭和/大正/明治, R8.11.2, 元年),\n' +
   'national holidays from the Cabinet Office list (' + COVERAGE.from.slice(0, 4) + '-' + COVERAGE.to.slice(0, 4) + '), business-day check,\n' +
   'add_business_days=N, to=DATE (business days between), yearend=none|gov|bank (12/29-1/3 or 12/31-1/3 closures). JSON out.\n' +
-  'Free trial (date info only, no add/to): GET /api/jpdate/trial?date=...\n'));
+  'Free trial (date info only, no add/to): GET /api/jpdate/trial?date=...\n\n' +
+  'Japanese postal code API: GET /api/zip?zip=100-0001 ($0.001 USDC via x402), or zips=a,b,c (up to 100 per call).\n' +
+  'Returns prefecture/city/town in kanji, kana and romaji plus the JIS municipality code; accepts 〒, hyphens and full-width digits.\n' +
+  'Data: Japan Post (' + ZIP_META.zip_codes + ' codes, updated ' + ZIP_META.data_updated + '). Free trial (prefecture + city only): GET /api/zip/trial?zip=...\n'));
 const ACCEPTS = [
   { scheme: 'exact', price: '$0.01', network: BASE, payTo: BASE_PAYTO },
   { scheme: 'exact', price: '$0.01', network: SOL, payTo: SOL_PAYTO },
@@ -42,6 +46,10 @@ const JD_DESC = 'Japanese calendar: wareki (Reiwa/Heisei/Showa) to/from Gregoria
 const JD_OUT = { date: '2026-11-03', weekday: '火', wareki: { era: '令和', year: 8, text: '令和8年11月3日', short: 'R8.11.3' }, holiday: '文化の日', business_day: false };
 const jd = (q, r, trial) => { try { const p = { ...q.query }; if (trial) { delete p.add_business_days; delete p.to; } const o = jpdate(p); if (trial) o.note = 'Free trial: add_business_days and to need the paid route GET /api/jpdate ($0.001 USDC via x402).'; r.json(o); } catch (e) { r.status(400).json({ error: e.message }); } };
 app.get('/api/jpdate/trial', (q, r) => jd(q, r, true));
+const ZP_DESC = 'Japanese postal code (郵便番号) to address: prefecture, city, town in kanji, kana and romaji, JIS code; batch up to 100';
+const ZP_OUT = { zip: '100-0001', found: true, results: [{ prefecture: '東京都', city: '千代田区', town: '千代田', address: '東京都千代田区千代田', kana: { prefecture: 'トウキョウト', city: 'チヨダク', town: 'チヨダ' }, romaji: { prefecture: 'TOKYO TO', city: 'CHIYODA KU', town: 'CHIYODA' }, jis_code: '13101' }] };
+const zp = (q, r, trial) => { try { const o = zipLookup(q.query, trial); if (trial) o.note = 'Free trial: town, kana, romaji, JIS code and batch need the paid route GET /api/zip ($0.001 USDC via x402).'; r.json(o); } catch (e) { r.status(400).json({ error: e.message }); } };
+app.get('/api/zip/trial', (q, r) => zp(q, r, true));
 const DESC = 'Check a JA/ZH localization CSV (key,source,target) for placeholder, blank, untranslated and CJK punctuation errors';
 const SAMPLE = 'key,source,target\nmenu.start,Start {name},スタート\n';
 const OUT = '# Localization check\n- menu.start: placeholder {name} missing in target\n';
@@ -58,6 +66,12 @@ app.get('/openapi.json', (_q, r) => r.json({
           { name: 'yearend', in: 'query', schema: { type: 'string', enum: ['none', 'gov', 'bank'] } }],
         responses: { '200': { description: 'JSON day info', content: { 'application/json': { example: JD_OUT } } }, '402': { description: 'Payment Required (x402, $0.001 USDC)' } } },
     },
+    '/api/zip': {
+      get: { summary: ZP_DESC, 'x-payment-info': { protocol: 'x402', price: '0.001', currency: 'USDC', networks: [BASE, SOL] },
+        parameters: [{ name: 'zip', in: 'query', schema: { type: 'string' }, example: '100-0001' }, { name: 'zips', in: 'query', schema: { type: 'string' }, description: 'comma-separated, up to 100' }],
+        responses: { '200': { description: 'JSON address', content: { 'application/json': { example: ZP_OUT } } }, '402': { description: 'Payment Required (x402, $0.001 USDC)' } } },
+    },
+    '/api/zip/trial': { get: { summary: 'Free trial: prefecture and city for one postal code', parameters: [{ name: 'zip', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON' } } } },
     '/api/jpdate/trial': { get: { summary: 'Free trial: day info for one date (no add_business_days / to)', parameters: [{ name: 'date', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON day info' } } } },
     '/api/loccheck/trial': {
       post: { summary: 'Free trial: same check on the first 5 rows only (no payment)', requestBody: { required: true, content: { 'text/csv': { schema: { type: 'string' }, example: SAMPLE } } },
@@ -105,8 +119,13 @@ app.use(paymentMiddleware({
     accepts: JD_ACCEPTS, description: JD_DESC, mimeType: 'application/json',
     extensions: declareDiscoveryExtension({ input: { date: '2026-11-03', add_business_days: 3 }, inputSchema: { properties: { date: { type: 'string' }, add_business_days: { type: 'integer' }, to: { type: 'string' }, yearend: { type: 'string' } }, required: ['date'] }, output: { example: JD_OUT } }),
   },
+  'GET /api/zip': {
+    accepts: JD_ACCEPTS, description: ZP_DESC, mimeType: 'application/json',
+    extensions: declareDiscoveryExtension({ input: { zip: '100-0001' }, inputSchema: { properties: { zip: { type: 'string' }, zips: { type: 'string' } } }, output: { example: ZP_OUT } }),
+  },
 }, server));
 app.get('/api/jpdate', (q, r) => jd(q, r, false));
+app.get('/api/zip', (q, r) => zp(q, r, false));
 const run = (csv, r, note = '') => {
   const d = mkdtempSync(join(tmpdir(), 'lc-')); const f = join(d, 'in.csv');
   writeFileSync(f, csv || '');

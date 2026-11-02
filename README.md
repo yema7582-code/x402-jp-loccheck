@@ -20,3 +20,11 @@ Rows whose key ends in a store field (`name`, `subtitle`, `keywords`, `promotion
 - `business_day`, `add_business_days=N` (±1000), `to=DATE` (business days between, start exclusive, end inclusive)
 - `yearend=gov` (12/29–1/3 closed) or `bank` (12/31–1/3 closed)
 - Free trial without payment: `GET /api/jpdate/trial?date=...` (day info only)
+
+## Japanese postal code API
+
+`GET /api/zip?zip=100-0001` ($0.001 USDC via x402, Base or Solana) or `zips=1000001,5300001,...` (up to 100 per call).
+Returns prefecture, city and town in kanji, kana and romaji, the full address string and the JIS municipality code.
+Input may include 〒, hyphens or full-width digits. Codes shared by several towns return every match (`multiple: true`).
+Data: Japan Post `utf_ken_all.zip` (2026-10-30 update, 120,721 codes) plus `KEN_ALL_ROME` for romaji; every response carries the data date.
+Free trial: `GET /api/zip/trial?zip=...` (prefecture + city only).
