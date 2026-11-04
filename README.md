@@ -39,3 +39,13 @@ Free trial: `GET /api/zip/trial?zip=...` (prefecture + city only).
 - `account`: account number check, zero-padded to 7 digits
 
 Free trial: `GET /api/bank/trial?bank=0005` (bank name only). Data: [zengin-code](https://github.com/zengin-code/source-data) (MIT), 1,146 banks and 28,944 branches.
+
+## Japanese invoice registration number check ($0.002 per call)
+
+`GET /api/invoice?number=T1180301018771&name=トヨタ自動車` or `numbers=T…,T…&names=…,…` (up to 10 per call), $0.002 USDC via x402 (Base or Solana).
+
+- Format (`T` + 13 digits; full-width digits, hyphens and a missing `T` are normalised) and the check digit, so typos are caught before any lookup
+- Live lookup on the National Tax Agency public site (適格請求書発行事業者公表サイト): registered name, registration date, address, 取消/失効 flag
+- `name` match after removing 株式会社/(株) etc.; `valid` is true only when registered, not revoked, and the name matches
+
+Free trial: `GET /api/invoice/trial?number=...` (format + check digit only). Matching only, no tax advice.

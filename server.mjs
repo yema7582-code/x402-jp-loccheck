@@ -14,6 +14,7 @@ import { declareDiscoveryExtension, bazaarResourceServerExtension } from '@x402/
 import { jpdate, COVERAGE } from './jpdate.mjs';
 import { zipLookup, ZIP_META } from './zipcode.mjs';
 import { bankLookup, BANK_META } from './bank.mjs';
+import { invoiceCheck } from './invoice.mjs';
 
 const BASE_PAYTO = '0x4C4860b980a3AE0c91aa69e8eff48009C5469fEe';
 const SOL_PAYTO = '8BwJ9oHnwfiQgAMrR6fbBX4e1EcELGaeyiRAeP21sLbo';
@@ -40,7 +41,10 @@ app.get('/', (_q, r) => r.type('text/plain').send(
   'Data: Japan Post (' + ZIP_META.zip_codes + ' codes, updated ' + ZIP_META.data_updated + '). Free trial (prefecture + city only): GET /api/zip/trial?zip=...\n\n' +
   'Japanese bank transfer API: GET /api/bank?bank=0005&branch=新宿&name=株式会社サンプル&account=12345 ($0.001 USDC via x402).\n' +
   'Bank/branch code (全銀コード) or name to name/kana/romaji, plus 振込名義 conversion to zengin half-width kana (ｶ) ﾕ) (ﾄﾞ etc.) with invalid-character flags.\n' +
-  'Data: zengin-code (MIT, ' + BANK_META.banks + ' banks, ' + BANK_META.branches + ' branches). Free trial (bank name only): GET /api/bank/trial?bank=0005\n'));
+  'Data: zengin-code (MIT, ' + BANK_META.banks + ' banks, ' + BANK_META.branches + ' branches). Free trial (bank name only): GET /api/bank/trial?bank=0005\n\n' +
+  'Japanese invoice number check (適格請求書発行事業者登録番号): GET /api/invoice?number=T1180301018771&name=トヨタ自動車 ($0.002 USDC via x402), or numbers=a,b,c&names=x,y,z (up to 10).\n' +
+  'Format and check digit, then a live lookup on the National Tax Agency public site: registered name, registration date, address, revoked/expired flag, name match.\n' +
+  'Free trial (format + check digit only): GET /api/invoice/trial?number=...\n'));
 const ACCEPTS = [
   { scheme: 'exact', price: '$0.01', network: BASE, payTo: BASE_PAYTO },
   { scheme: 'exact', price: '$0.01', network: SOL, payTo: SOL_PAYTO },
@@ -58,6 +62,11 @@ const BK_DESC = 'Japanese bank transfer helper: bank/branch code (zengin) or nam
 const BK_OUT = { bank: { code: '0005', name: '三菱ＵＦＪ', kana: 'ミツビシユ－エフジエイ' }, branch: { code: '341', name: '新宿', kana: 'シンジユク' }, account_name: { zengin_kana: 'ｶ)ｻﾝﾌﾟﾙ', valid: true }, account_number: { normalized: '0012345', valid: true } };
 const bk = (q, r, trial) => { try { const o = bankLookup(q.query, trial); if (trial) o.note = 'Free trial: branch, kana, 振込名義 conversion and account check need the paid route GET /api/bank ($0.001 USDC via x402).'; r.json(o); } catch (e) { r.status(400).json({ error: e.message }); } };
 app.get('/api/bank/trial', (q, r) => bk(q, r, true));
+const IV_ACCEPTS = ACCEPTS.map((a) => ({ ...a, price: '$0.002' }));
+const IV_DESC = 'Japanese qualified invoice issuer number (インボイス登録番号 T+13 digits): format and check digit, live National Tax Agency lookup of registered name, date, address, revoked/expired status and name match; batch up to 10';
+const IV_OUT = { number: 'T1180301018771', format_ok: true, check_digit_ok: true, nta: { found: true, name: 'トヨタ自動車株式会社', registered: '令和5年10月1日', revoked: '' }, registered_now: true, name_match: true, valid: true };
+const iv = async (q, r, trial) => { try { const o = await invoiceCheck(q.query, trial); if (trial) o.note = 'Free trial: the live NTA lookup (name, date, revoked status, name match) and batch need the paid route GET /api/invoice ($0.002 USDC via x402).'; r.json(o); } catch (e) { r.status(400).json({ error: e.message }); } };
+app.get('/api/invoice/trial', (q, r) => iv(q, r, true));
 const DESC = 'Check a JA/ZH localization CSV (key,source,target) for placeholder, blank, untranslated and CJK punctuation errors';
 const SAMPLE = 'key,source,target\nmenu.start,Start {name},スタート\n';
 const OUT = '# Localization check\n- menu.start: placeholder {name} missing in target\n';
@@ -85,6 +94,8 @@ app.get('/openapi.json', (_q, r) => r.json({
           { name: 'name', in: 'query', schema: { type: 'string' }, description: '振込名義 (account holder) to convert' }, { name: 'account', in: 'query', schema: { type: 'string' } }],
         responses: { '200': { description: 'JSON', content: { 'application/json': { example: BK_OUT } } }, '402': { description: 'Payment Required (x402, $0.001 USDC)' } } },
     },
+    '/api/invoice': { get: { summary: 'Japanese invoice registration number (T+13) check with live NTA lookup, $0.002 via x402', parameters: [{ name: 'number', in: 'query', schema: { type: 'string' } }, { name: 'name', in: 'query', schema: { type: 'string' } }, { name: 'numbers', in: 'query', schema: { type: 'string' } }, { name: 'names', in: 'query', schema: { type: 'string' } }], responses: { '200': { description: 'JSON' }, '402': { description: 'Payment required' } } } },
+    '/api/invoice/trial': { get: { summary: 'Free trial: format and check digit for one number', parameters: [{ name: 'number', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON' } } } },
     '/api/bank/trial': { get: { summary: 'Free trial: bank name for one bank code', parameters: [{ name: 'bank', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON' } } } },
     '/api/zip/trial': { get: { summary: 'Free trial: prefecture and city for one postal code', parameters: [{ name: 'zip', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON' } } } },
     '/api/jpdate/trial': { get: { summary: 'Free trial: day info for one date (no add_business_days / to)', parameters: [{ name: 'date', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'JSON day info' } } } },
@@ -138,6 +149,10 @@ app.use(paymentMiddleware({
     accepts: JD_ACCEPTS, description: ZP_DESC, mimeType: 'application/json',
     extensions: declareDiscoveryExtension({ input: { zip: '100-0001' }, inputSchema: { properties: { zip: { type: 'string' }, zips: { type: 'string' } } }, output: { example: ZP_OUT } }),
   },
+  'GET /api/invoice': {
+    accepts: IV_ACCEPTS, description: IV_DESC, mimeType: 'application/json',
+    extensions: declareDiscoveryExtension({ input: { number: 'T1180301018771', name: 'トヨタ自動車' }, inputSchema: { properties: { number: { type: 'string' }, name: { type: 'string' }, numbers: { type: 'string' }, names: { type: 'string' } } }, output: { example: IV_OUT } }),
+  },
   'GET /api/bank': {
     accepts: JD_ACCEPTS, description: BK_DESC, mimeType: 'application/json',
     extensions: declareDiscoveryExtension({ input: { bank: '0005', branch: '341', name: '株式会社サンプル' }, inputSchema: { properties: { bank: { type: 'string' }, branch: { type: 'string' }, name: { type: 'string' }, account: { type: 'string' } } }, output: { example: BK_OUT } }),
@@ -146,6 +161,7 @@ app.use(paymentMiddleware({
 app.get('/api/jpdate', (q, r) => jd(q, r, false));
 app.get('/api/zip', (q, r) => zp(q, r, false));
 app.get('/api/bank', (q, r) => bk(q, r, false));
+app.get('/api/invoice', (q, r) => iv(q, r, false));
 const run = (csv, r, note = '') => {
   const d = mkdtempSync(join(tmpdir(), 'lc-')); const f = join(d, 'in.csv');
   writeFileSync(f, csv || '');
